@@ -1,0 +1,12 @@
+# Whitelist: only code, docs, plan and trained models are shared.
+/*
+!/.gitignore
+!/code/
+!/Documentation_template.md
+!/TEAM_PLAN.md
+!/work/
+/work/*
+!/work/models/
+__pycache__/
+*.pyc
+*.prof
