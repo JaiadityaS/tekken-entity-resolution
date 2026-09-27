@@ -19,6 +19,7 @@ Blocking runs independently per country label (open set: whatever S1 contains).
 
 Cost is O(sum over kept keys of df) per S1 record, i.e. linear in the data size.
 """
+import gc
 import time
 import zlib
 from multiprocessing import Pool
@@ -31,7 +32,9 @@ from sparse_dot_topn import sp_matmul_topn
 from config import N_JOBS, batched_imap
 from normalize import skeleton
 
-HASH_BITS = 28
+# Reduced from 28 to 24 to cap peak RAM at ~256 MB (2^28 caused a 2 GiB int64 allocation).
+# 2^24 = 16 M hash slots; collision rate is negligible for the ~5-15 M distinct keys seen here.
+HASH_BITS = 24
 HASH_MASK = (1 << HASH_BITS) - 1
 
 BLOCK_COLS = ["n_core", "n_skel", "n_concat", "a_alpha", "a_nums", "a_first_num"]
@@ -197,6 +200,8 @@ def generate_candidates(s1, r, channels, max_df=5000, min_score=0.02, keep_rank=
             log(f"  [{country}] s1={len(s1c):,} r={len(rc):,} pairs={len(p):,} "
                 f"({len(p) / max(len(s1c), 1):.1f}/s1) keys={n_keys:,} "
                 f"hash {th:.0f}s total {time.time() - t:.0f}s")
+            del s1c, rc, p
+            gc.collect()
     c = pd.concat(parts, ignore_index=True)
     sc = [x for x in c.columns if x.startswith("sc_")]
     rk = [x for x in c.columns if x.startswith("rk_")]

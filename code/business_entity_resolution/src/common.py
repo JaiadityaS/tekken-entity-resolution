@@ -12,11 +12,18 @@ from features import NORM_COLS, index_frame, pair_features
 
 
 def load_sources(split):
-    """Normalised Source 1 and the concatenation of Source 2 + Source 3 (needed columns)."""
+    """Normalised Source 1 and the concatenation of Source 2 + Source 3 (needed columns).
+
+    dtype_backend='numpy_nullable' keeps all columns in numpy/Python-backed memory so that
+    boolean subset operations (r[r.country==country]) use numpy's allocator, which handles
+    heap fragmentation gracefully.  PyArrow-backed DataFrames require large contiguous
+    blocks and raise ArrowMemoryError on fragmented heaps.
+    """
     cols = NORM_COLS + ["country"]
-    s1 = pd.read_parquet(norm_path(split, 1), columns=cols)
-    r = pd.concat([pd.read_parquet(norm_path(split, 2), columns=cols),
-                   pd.read_parquet(norm_path(split, 3), columns=cols)], ignore_index=True)
+    kw = dict(dtype_backend="numpy_nullable")
+    s1 = pd.read_parquet(norm_path(split, 1), columns=cols, **kw)
+    r = pd.concat([pd.read_parquet(norm_path(split, 2), columns=cols, **kw),
+                   pd.read_parquet(norm_path(split, 3), columns=cols, **kw)], ignore_index=True)
     return s1, r
 
 

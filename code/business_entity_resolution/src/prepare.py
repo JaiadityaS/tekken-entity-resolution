@@ -25,16 +25,29 @@ def _norm_chunk(args):
 
 
 def normalize_frame(df, pool, chunk=20000):
-    """Return df with normalised columns appended (n_* from name, a_* from address)."""
+    """Return df with normalised columns appended (n_* from name, a_* from address).
+
+    Flushes accumulated results to DataFrames every FLUSH rows to avoid a
+    pyarrow contiguous-memory realloc failure on large source files (e.g. test_source3).
+    """
     jobs = ((df.business_name.values[i:i + chunk].tolist(),
              df.business_address.values[i:i + chunk].tolist())
             for i in range(0, len(df), chunk))
     names, addrs = [], []
+    nd_parts, ad_parts = [], []
+    FLUSH = 400_000  # flush to DataFrame every 400 k rows to keep peak alloc small
     for n, a in batched_imap(pool, _norm_chunk, jobs):
         names.extend(n)
         addrs.extend(a)
-    nd = pd.DataFrame(names).add_prefix("n_")
-    ad = pd.DataFrame(addrs).add_prefix("a_")
+        if len(names) >= FLUSH:
+            nd_parts.append(pd.DataFrame(names))
+            ad_parts.append(pd.DataFrame(addrs))
+            names, addrs = [], []
+    if names:
+        nd_parts.append(pd.DataFrame(names))
+        ad_parts.append(pd.DataFrame(addrs))
+    nd = pd.concat(nd_parts, ignore_index=True).add_prefix("n_")
+    ad = pd.concat(ad_parts, ignore_index=True).add_prefix("a_")
     out = pd.concat([df.reset_index(drop=True), nd, ad], axis=1)
     out["n_is_domain"] = out.n_is_domain.astype("int8")
     out["n_is_indic"] = out.n_is_indic.astype("int8")
