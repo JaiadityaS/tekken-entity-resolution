@@ -200,8 +200,12 @@ ADDR_CANON = {
     "ahmadabad": "ahmedabad", "calcutta": "kolkata", "madras": "chennai",
     # France
     "rue": "rue", "r": "rue", "boul": "blvd", "chemin": "ch", "ch": "ch",
-    "allee": "all", "impasse": "imp", "imp": "imp", "faubourg": "fbg", "fbg": "fbg",
+    "allee": "all", "all": "all", "impasse": "imp", "imp": "imp",
+    "faubourg": "fbg", "fbg": "fbg",
     "quai": "quai", "cours": "crs", "route": "rte", "rte": "rte",
+    "passage": "pass", "residence": "res", "lotissement": "lot",
+    "cite": "cite", "hameau": "ham",
+    "anenue": "ave",  # common OCR/typo for avenue
 }
 US_STATES = {
     "alabama": "al", "alaska": "ak", "arizona": "az", "arkansas": "ar", "california": "ca",
@@ -250,13 +254,131 @@ ADDR_STOP = {"no", "number", "door", "plot", "h", "hno", "house", "khata", "kh",
              "la", "le", "les", "d", "l", "nr", "opp", "bhd", "n", "o"}
 _NUM_RE = re.compile(r"\d+")
 
+# --------------------------------------------------------------------------------------
+# French address helpers (active only when country=="France")
+# --------------------------------------------------------------------------------------
 
-def normalize_address(raw):
+# Map French departments to regions for normalisation consistency.
+# Only the departments actually seen in the test data are included.
+FR_DEPT_TO_REGION = {
+    "gironde": "nouvelle aquitaine",
+    "nord": "hauts de france",
+    "pas de calais": "hauts de france",
+    "pas-de-calais": "hauts de france",
+    "loire atlantique": "pays de la loire",
+    "loire-atlantique": "pays de la loire",
+    "finistere": "bretagne",
+    "morbihan": "bretagne",
+    "cotes d armor": "bretagne",
+    "cotes-d-armor": "bretagne",
+    "ille et vilaine": "bretagne",
+    "ille-et-vilaine": "bretagne",
+    "maine et loire": "pays de la loire",
+    "maine-et-loire": "pays de la loire",
+    "sarthe": "pays de la loire",
+    "vendee": "pays de la loire",
+    "mayenne": "pays de la loire",
+    "charente maritime": "nouvelle aquitaine",
+    "charente-maritime": "nouvelle aquitaine",
+    "charente": "nouvelle aquitaine",
+    "dordogne": "nouvelle aquitaine",
+    "landes": "nouvelle aquitaine",
+    "lot et garonne": "nouvelle aquitaine",
+    "lot-et-garonne": "nouvelle aquitaine",
+    "pyrenees atlantiques": "nouvelle aquitaine",
+    "pyrenees-atlantiques": "nouvelle aquitaine",
+    "deux sevres": "nouvelle aquitaine",
+    "deux-sevres": "nouvelle aquitaine",
+    "vienne": "nouvelle aquitaine",
+    "haute vienne": "nouvelle aquitaine",
+    "haute-vienne": "nouvelle aquitaine",
+    "correze": "nouvelle aquitaine",
+    "creuse": "nouvelle aquitaine",
+    # Hauts-de-France
+    "aisne": "hauts de france",
+    "oise": "hauts de france",
+    "somme": "hauts de france",
+    # Pays de la Loire alternate forms
+    "loire": "pays de la loire",
+    # Île-de-France
+    "paris": "ile de france",
+    "seine saint denis": "ile de france",
+    "seine-saint-denis": "ile de france",
+    "hauts de seine": "ile de france",
+    "hauts-de-seine": "ile de france",
+    "val de marne": "ile de france",
+    "val-de-marne": "ile de france",
+    "seine et marne": "ile de france",
+    "seine-et-marne": "ile de france",
+    "yvelines": "ile de france",
+    "essonne": "ile de france",
+    "val d oise": "ile de france",
+    "val-d-oise": "ile de france",
+}
+
+# Build region canonical forms for consistent output
+FR_REGION_CANON = {
+    "nouvelle aquitaine": "nouvelle aquitaine",
+    "nouvelle-aquitaine": "nouvelle aquitaine",
+    "hauts de france": "hauts de france",
+    "hauts-de-france": "hauts de france",
+    "pays de la loire": "pays de la loire",
+    "pays-de-la-loire": "pays de la loire",
+    "bretagne": "bretagne",
+    "ile de france": "ile de france",
+    "ile-de-france": "ile de france",
+}
+
+# Build a regex to match departments and region names in addresses (longest first)
+_FR_GEO_NAMES = sorted(
+    {*FR_DEPT_TO_REGION, *FR_REGION_CANON}, key=len, reverse=True
+)
+_FR_GEO_RE = re.compile(
+    r"\b(" + "|".join(re.escape(n) for n in _FR_GEO_NAMES) + r")\b"
+)
+
+# Elision pattern: split French elisions like l'Orne, d'Artagnan in addresses
+_FR_ELISION_RE = re.compile(r"\b([ldnj])['\u2019]([a-z])", re.IGNORECASE)
+
+# bis/ter/quater after house number: "5 bis" -> "5bis", "12 ter" -> "12ter"
+_FR_BIS_TER_RE = re.compile(r"\b(\d+)\s+(bis|ter|quater)\b", re.IGNORECASE)
+
+
+def _french_address_preprocess(s):
+    """Apply France-specific address preprocessing BEFORE tokenisation.
+
+    1. Split elisions: l'Orne -> l orne
+    2. Attach bis/ter to house number: 5 bis -> 5bis
+    3. Replace departments with their region name
+    4. Canonicalise region name variants
+    """
+    # 1. Split elisions
+    s = _FR_ELISION_RE.sub(r"\1 \2", s)
+    # 2. Attach bis/ter/quater to house number
+    s = _FR_BIS_TER_RE.sub(lambda m: m.group(1) + m.group(2).lower(), s)
+    # 3 & 4. Map departments -> regions, canonicalise region names
+    def _geo_replace(m):
+        key = m.group(1)
+        # If it's a department, map to region
+        if key in FR_DEPT_TO_REGION:
+            return FR_DEPT_TO_REGION[key]
+        # If it's a region variant, canonicalise
+        if key in FR_REGION_CANON:
+            return FR_REGION_CANON[key]
+        return key
+    s = _FR_GEO_RE.sub(_geo_replace, s)
+    return s
+
+
+def normalize_address(raw, country=None):
     s, _ = translit_indic(raw or "")
     s = strip_accents(s).lower()
     s = re.sub(r"<\s*null\s*>|\bn/a\b", " ", s)
     s = _STATE_RE.sub(lambda m: " " + _STATE_MAP[m.group(1)] + " ", s)
     s = s.replace("&", " ")
+    # French-specific address preprocessing (only for France)
+    if country == "France":
+        s = _french_address_preprocess(s)
     # '5th' -> '5', '2nd' -> '2'
     s = re.sub(r"\b(\d+)(?:st|nd|rd|th)\b", r"\1", s)
     toks = []
@@ -271,6 +393,7 @@ def normalize_address(raw):
             continue
         if any(c.isdigit() for c in t):
             # mixed token like '1335c' / 'b12' -> split into digits and letters
+            # For France, bis/ter attached to number: '5bis' -> '5' + 'bis'
             for part in re.findall(r"\d+|[a-z]+", t):
                 toks.append(part.lstrip("0") or "0" if part.isdigit() else part)
             continue

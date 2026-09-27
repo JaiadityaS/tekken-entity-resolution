@@ -18,16 +18,17 @@ def read_tsv(path, **kw):
 
 
 def _norm_chunk(args):
-    names, addrs = args
+    names, addrs, countries = args
     n = [normalize_name(x) for x in names]
-    a = [normalize_address(x) for x in addrs]
+    a = [normalize_address(x, country=c) for x, c in zip(addrs, countries)]
     return n, a
 
 
 def normalize_frame(df, pool, chunk=20000):
     """Return df with normalised columns appended (n_* from name, a_* from address)."""
     jobs = ((df.business_name.values[i:i + chunk].tolist(),
-             df.business_address.values[i:i + chunk].tolist())
+             df.business_address.values[i:i + chunk].tolist(),
+             df.country.values[i:i + chunk].tolist())
             for i in range(0, len(df), chunk))
     names, addrs = [], []
     for n, a in batched_imap(pool, _norm_chunk, jobs):
