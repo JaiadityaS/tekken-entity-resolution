@@ -1,6 +1,7 @@
 # Whitelist: only code, docs, plan and trained models are shared.
 /*
 !/.gitignore
+!/.gitattributes
 !/code/
 !/Documentation_template.md
 !/TEAM_PLAN.md

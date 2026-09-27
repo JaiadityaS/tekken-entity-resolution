@@ -1,0 +1,2 @@
+work/models/* -text
+*.py text eol=lf
